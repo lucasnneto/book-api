@@ -9,7 +9,6 @@ const User = require("../models/User");
 router.get("/", async (req, res) => {
   try {
     const { query } = req.query;
-    console.log(query);
     if (query) {
       const users = await User.find({
         username: { $regex: query, $options: "i" },
