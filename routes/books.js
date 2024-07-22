@@ -8,8 +8,27 @@ const User = require("../models/User");
 // Obter todos os livros
 router.get("/", async (req, res) => {
   try {
-    const books = await Book.find().populate("owner borrowedBy");
-    res.json(books);
+    const { query } = req.query;
+    console.log(query);
+    if (query) {
+      const users = await User.find({
+        username: { $regex: query, $options: "i" },
+      });
+      const userIds = users.map((user) => user._id);
+
+      const books = await Book.find({
+        $or: [
+          { title: { $regex: query, $options: "i" } },
+          { author: { $regex: query, $options: "i" } },
+          { owner: { $in: userIds } },
+        ],
+      }).populate("owner borrowedBy");
+
+      res.json(books);
+    } else {
+      const books = await Book.find().populate("owner borrowedBy");
+      res.json(books);
+    }
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
