@@ -20,9 +20,10 @@ mongoose.connect(process.env.MONGO_URL, {
 const userRoutes = require("./routes/users");
 const bookRoutes = require("./routes/books");
 
-app.use("/api/users", userRoutes);
-app.use("/api/books", bookRoutes);
-
+app.use("/users", userRoutes);
+app.use("/books", bookRoutes);
+app.get("/", (req, res) => res.send("Express on Vercel"));
 // Inicialização do servidor
 const PORT = process.env.PORT;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+module.exports = app;
