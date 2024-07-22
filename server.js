@@ -3,6 +3,7 @@ const bodyParser = require("body-parser");
 const mongoose = require("mongoose");
 const app = express();
 const cors = require("cors");
+require("dotenv").config();
 
 // Configuração do CORS
 app.use(cors());
@@ -22,6 +23,7 @@ const bookRoutes = require("./routes/books");
 
 app.use("/users", userRoutes);
 app.use("/books", bookRoutes);
+
 app.get("/", (req, res) => res.send("Express on Vercel."));
 // Inicialização do servidor
 const PORT = process.env.PORT || 3000;
