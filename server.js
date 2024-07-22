@@ -24,6 +24,6 @@ app.use("/users", userRoutes);
 app.use("/books", bookRoutes);
 app.get("/", (req, res) => res.send("Express on Vercel"));
 // Inicialização do servidor
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 module.exports = app;
