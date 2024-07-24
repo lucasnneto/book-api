@@ -4,46 +4,100 @@ const router = express.Router();
 const jwt = require("jsonwebtoken");
 const Book = require("../models/Book");
 const User = require("../models/User");
+const mongoose = require("mongoose");
 
 // Obter todos os livros
 router.get("/", async (req, res) => {
   try {
-    const { query } = req.query;
-    if (query) {
-      const users = await User.find({
-        username: { $regex: query, $options: "i" },
+    const pipeline = [
+      {
+        $lookup: {
+          from: "users",
+          localField: "owner",
+          foreignField: "_id",
+          as: "ownerDetails",
+        },
+      },
+      {
+        $unwind: "$ownerDetails",
+      },
+      {
+        $project: {
+          "ownerDetails.password": 0,
+        },
+      },
+      {
+        $group: {
+          _id: "$series",
+          books: {
+            $push: {
+              _id: "$_id",
+              title: "$title",
+              author: "$author",
+              owner: "$ownerDetails",
+              borrowedTo: "$borrowedTo",
+            },
+          },
+          count: {
+            $sum: 1,
+          },
+        },
+      },
+      {
+        $project: {
+          series: "$_id",
+          books: "$books",
+          count: "$count",
+          _id: 0,
+        },
+      },
+    ];
+    const { filter, owner } = req.query;
+    if (owner) {
+      pipeline.unshift({
+        $match: {
+          owner: new mongoose.Types.ObjectId(owner),
+        },
       });
+    } else if (filter) {
+      const users = await User.find({
+        username: { $regex: filter, $options: "i" },
+      });
+      const filterRaw = removeAccents(filter.toUpperCase().replace(/ /g, ""));
       const userIds = users.map((user) => user._id);
-
-      const books = await Book.find({
-        $or: [
-          { title: { $regex: query, $options: "i" } },
-          { author: { $regex: query, $options: "i" } },
-          { owner: { $in: userIds } },
-        ],
-      }).populate("owner borrowedBy");
-
-      res.json(books);
-    } else {
-      const books = await Book.find().populate("owner borrowedBy");
-      res.json(books);
+      pipeline.unshift({
+        $match: {
+          $or: [
+            { titleRaw: { $regex: filterRaw, $options: "i" } },
+            { authorRaw: { $regex: filterRaw, $options: "i" } },
+            { seriesRaw: { $regex: filterRaw, $options: "i" } },
+            { owner: { $in: userIds } },
+          ],
+        },
+      });
     }
+
+    const books = await Book.aggregate([pipeline]);
+    res.json(books);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// Adicionar livro
+// Adicionar VARIOS livro
 router.post("/", verifyToken, async (req, res) => {
-  const { title, author } = req.body;
+  const { books } = req.body;
+  const booksMap = books.map((book) => ({
+    ...book,
+    titleRaw: removeAccents(book.title.toUpperCase().replace(/ /g, "")),
+    seriesRaw: book.series
+      ? removeAccents(book.series.toUpperCase().replace(/ /g, ""))
+      : null,
+    authorRaw: removeAccents(book.author.toUpperCase().replace(/ /g, "")),
+    owner: new mongoose.Types.ObjectId(req.user.id),
+  }));
   try {
-    const newBook = new Book({
-      title,
-      author,
-      owner: req.user.id,
-    });
-
-    const savedBook = await newBook.save();
+    const savedBook = await Book.insertMany(booksMap);
 
     res.json(savedBook);
   } catch (err) {
@@ -52,18 +106,26 @@ router.post("/", verifyToken, async (req, res) => {
 });
 
 // Atualizar livro
-router.put("/:id", verifyToken, async (req, res) => {
+router.put("/", verifyToken, async (req, res) => {
   try {
-    const book = await Book.findById(req.params.id);
-    if (!book) return res.status(404).json({ message: "Livro não encontrado" });
+    const { ids, books } = req.body;
+    //TODO FAZER MAP DE RAW - MESMO DO POST
+    const book = await Book.find({
+      _id: ids.map((id) => new mongoose.Types.ObjectId(id)),
+      owner: new mongoose.Types.ObjectId(req.user.id),
+    });
 
-    if (book.owner.toString() !== req.user.id)
+    if (book.length !== ids.length)
       return res.status(401).json({ message: "Não autorizado" });
 
-    book.title = req.body.title || book.title;
-    book.author = req.body.author || book.author;
+    //BUG ALTERAR CODIGO PARA PARA USAR MAP E PASSAR DE 1 POR UM
+    const updatedBook = await Book.updateMany(
+      {
+        _id: ids.map((id) => new mongoose.Types.ObjectId(id)),
+      },
+      books
+    );
 
-    const updatedBook = await book.save();
     res.json(updatedBook);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -71,54 +133,78 @@ router.put("/:id", verifyToken, async (req, res) => {
 });
 
 // Excluir livro
-router.delete("/:id", verifyToken, async (req, res) => {
+router.delete("/", verifyToken, async (req, res) => {
   try {
-    const book = await Book.findById(req.params.id);
-    if (!book) return res.status(404).json({ message: "Livro não encontrado" });
+    const { ids } = req.query;
+    const book = await Book.find({
+      _id: ids.map((id) => new mongoose.Types.ObjectId(id)),
+      owner: new mongoose.Types.ObjectId(req.user.id),
+    });
 
-    if (book.owner.toString() !== req.user.id)
+    if (book.length !== ids.length)
       return res.status(401).json({ message: "Não autorizado" });
 
+    await Book.deleteMany({
+      _id: ids.map((id) => new mongoose.Types.ObjectId(id)),
+    });
+
     await Book.findByIdAndDelete(req.params.id);
-    res.json({ message: "Livro removido" });
+    res.json({ message: "Livros removidos" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
 // Emprestar livro para alguém
-router.post("/:id/borrow", verifyToken, async (req, res) => {
+router.post("/borrow", verifyToken, async (req, res) => {
   try {
-    const book = await Book.findById(req.params.id);
-    if (!book) return res.status(404).json({ message: "Livro não encontrado" });
+    const { idsBook, nameBorrow } = req.body;
+    const book = await Book.find({
+      _id: idsBook.map((id) => new mongoose.Types.ObjectId(id)),
+      owner: new mongoose.Types.ObjectId(req.user.id),
+    });
 
-    if (book.owner.toString() === req.user.id) {
-      book.borrowedBy = req.body.userId;
-      const updatedBook = await book.save();
-      res.json(updatedBook);
-    } else {
-      res
-        .status(401)
-        .json({ message: "Não autorizado a emprestar este livro" });
-    }
+    if (book.length !== idsBook.length)
+      return res.status(401).json({ message: "Não autorizado" });
+
+    await Book.updateMany(
+      {
+        _id: idsBook.map((id) => new mongoose.Types.ObjectId(id)),
+      },
+      {
+        borrowedTo: nameBorrow,
+      }
+    );
+    res.json({ message: "Livros Atualizados" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
 // Devolver livro
-router.post("/:id/return", verifyToken, async (req, res) => {
+router.post("/return", verifyToken, async (req, res) => {
   try {
-    const book = await Book.findById(req.params.id);
-    if (!book) return res.status(404).json({ message: "Livro não encontrado" });
+    const { idsBook } = req.body;
+    const book = await Book.find({
+      _id: idsBook.map((id) => new mongoose.Types.ObjectId(id)),
+      owner: new mongoose.Types.ObjectId(req.user.id),
+    });
 
-    if (book.owner.toString() === req.user.id) {
-      book.borrowedBy = null;
-      const updatedBook = await book.save();
-      res.json(updatedBook);
-    } else {
-      res.status(401).json({ message: "Não autorizado a devolver este livro" });
-    }
+    if (book.length !== idsBook.length)
+      return res.status(401).json({ message: "Não autorizado" });
+
+    await Book.updateMany(
+      {
+        _id: idsBook.map((id) => new mongoose.Types.ObjectId(id)),
+      },
+      {
+        borrowedTo: null,
+      },
+      {
+        new: true,
+      }
+    );
+    res.json({ message: "Livros Atualizados" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -139,6 +225,9 @@ function verifyToken(req, res, next) {
     console.log(err);
     res.status(403).json({ message: "Token inválido" });
   }
+}
+function removeAccents(str) {
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
 module.exports = router;
