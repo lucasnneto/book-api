@@ -47,10 +47,7 @@ router.post("/login", async (req, res) => {
 router.get("/me", verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
-    const books = await Books.find({ owner: req.user.id }).populate(
-      "borrowedBy"
-    );
-    res.json({ user, books });
+    res.json({ user });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
