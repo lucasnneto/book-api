@@ -133,9 +133,9 @@ router.put("/", verifyToken, async (req, res) => {
 });
 
 // Excluir livro
-router.delete("/", verifyToken, async (req, res) => {
+router.post("/delete", verifyToken, async (req, res) => {
   try {
-    const { ids } = req.query;
+    const { ids } = req.body;
     const book = await Book.find({
       _id: ids.map((id) => new mongoose.Types.ObjectId(id)),
       owner: new mongoose.Types.ObjectId(req.user.id),
