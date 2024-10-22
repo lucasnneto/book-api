@@ -6,8 +6,39 @@ const Book = require("../models/Book");
 const User = require("../models/User");
 const mongoose = require("mongoose");
 
-// Obter todos os livros
 router.get("/", async (req, res) => {
+  try {
+    const { filter, owner } = req.query;
+
+    // Objeto para armazenar as condições de filtro
+    let query = {};
+
+    // Se o parâmetro "filter" for passado, filtra por title, author, borrowedTo ou series
+    if (filter) {
+      const filterRaw = removeAccents(filter.toUpperCase().replace(/ /g, ""));
+      query.$or = [
+        { titleRaw: { $regex: filterRaw, $options: "i" } }, // Busca por título (insensitive)
+        { authorRaw: { $regex: filterRaw, $options: "i" } }, // Busca por autor (insensitive)
+        { seriesRaw: { $regex: filterRaw, $options: "i" } }, // Busca por série (insensitive)
+      ];
+    }
+
+    // Se o parâmetro "owner" for passado, filtra pelos livros do dono especificado
+    if (owner) {
+      query.owner = owner;
+    }
+
+    // Busca os livros que atendem aos critérios
+    const books = await Book.find(query).populate("owner", "username");
+
+    res.status(200).json(books);
+  } catch (error) {
+    res.status(500).json({ message: "Erro ao buscar livros", error });
+  }
+});
+
+// Obter todos os livros
+router.get("/series", async (req, res) => {
   try {
     const pipeline = [
       {
@@ -89,6 +120,9 @@ router.post("/", verifyToken, async (req, res) => {
   const { books } = req.body;
   const booksMap = books.map((book) => ({
     ...book,
+    series: book.series ? book.series.trim() : null,
+    title: book.title.trim(),
+    author: book.author.trim(),
     titleRaw: removeAccents(book.title.toUpperCase().replace(/ /g, "")),
     seriesRaw: book.series
       ? removeAccents(book.series.toUpperCase().replace(/ /g, ""))
@@ -172,7 +206,7 @@ router.post("/borrow", verifyToken, async (req, res) => {
         _id: idsBook.map((id) => new mongoose.Types.ObjectId(id)),
       },
       {
-        borrowedTo: nameBorrow,
+        borrowedTo: nameBorrow.trim(),
       }
     );
     res.json({ message: "Livros Atualizados" });
